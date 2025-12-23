@@ -494,6 +494,14 @@ case "$player_function" in
     *) dep_ch "$player_function" ;;
 esac
 
+# Auto History Menu Logic
+if [ -z "$query" ] && [ "$search" = "scrape" ] && [ -s "$histfile" ]; then
+    menu_selection=$(printf "Search\nHistory" | nth "Main Menu: ")
+    if [ "$menu_selection" = "History" ]; then
+        search="history"
+    fi
+fi
+
 # searching
 case "$search" in
     history)
@@ -560,20 +568,3 @@ while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth 
     [ -z "$ep_no" ] && die "Out of range"
     play
 done
-
-# ani-cli
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
-#
-# Project repository: https://github.com/pystardust/ani-cli
