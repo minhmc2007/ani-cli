@@ -7,10 +7,19 @@ Usage:
   python3 allanime_api.py --stream "2P7kFgthrEfRRkcdm" --mode sub --episode 2
   python3 allanime_api.py --stream "2P7kFgthrEfRRkcdm" --mode sub --episode 2 --quality 1080
 """
-import asyncio, json, sys, os, base64, subprocess, hashlib, tempfile, argparse
+import asyncio, json, sys, os, base64, subprocess, hashlib, tempfile, argparse, platform
 from playwright.async_api import async_playwright
 
 KEY_HEX = hashlib.sha256(b'Xot36i3lK3:v1').hexdigest()
+
+def _is_termux():
+    return (os.environ.get('PLAYWRIGHT_BROWSERS_PATH') == '0' or
+            platform.system() == 'Linux' and
+            ('com.termux' in os.environ.get('PATH', '') or
+             os.path.exists('/data/data/com.termux')))
+
+def _get_chromium_path():
+    return os.environ.get('CHROMIUM_PATH', '/data/data/com.termux/files/usr/bin/chromium-browser')
 
 DECODE_MAP = {
     '01':'9','08':'0','09':'1','0a':'2','0b':'3','0c':'4','0d':'5','0e':'6','0f':'7','00':'8',
@@ -58,7 +67,18 @@ class AllAnimeClient:
 
     async def __aenter__(self):
         self._pw = await async_playwright().__aenter__()
-        self._browser = await self._pw.chromium.launch(headless=True)
+        launch_opts = {'headless': True}
+        if _is_termux():
+            os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', '0')
+            cp = _get_chromium_path()
+            if os.path.exists(cp):
+                launch_opts['executablePath'] = cp
+                launch_opts.setdefault('args', []).extend(['--no-sandbox', '--disable-setuid-sandbox'])
+                if self.verbose:
+                    print(f"[INFO] Using Termux Chromium: {cp}", file=sys.stderr)
+            elif self.verbose:
+                print(f"[WARN] Chromium not found at {cp}. Set CHROMIUM_PATH env var or install: pkg install x11-repo chromium", file=sys.stderr)
+        self._browser = await self._pw.chromium.launch(**launch_opts)
         ctx = await self._browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
         )
