@@ -322,6 +322,8 @@ async def main():
     parser.add_argument('--search', help='Search anime')
     parser.add_argument('--episodes', help='Get episodes list for show ID')
     parser.add_argument('--stream', help='Get stream URL for show ID')
+    parser.add_argument('--graphql', help='Raw GraphQL query string (use with --variables)')
+    parser.add_argument('--variables', help='JSON variables string (use with --graphql)')
     parser.add_argument('--mode', default='sub', choices=['sub', 'dub'])
     parser.add_argument('--episode', default='1')
     parser.add_argument('--quality', default='best')
@@ -329,7 +331,15 @@ async def main():
     args = parser.parse_args()
 
     async with AllAnimeClient(verbose=args.verbose) as client:
-        if args.search:
+        if args.graphql:
+            vars_dict = json.loads(args.variables) if args.variables else {}
+            payload = {'query': args.graphql, 'variables': vars_dict}
+            result = await client.api_post(payload)
+            if args.verbose:
+                print(f"[STATUS] {result['status']}", file=sys.stderr)
+            print(result['body'])
+
+        elif args.search:
             results = await client.search(args.search, args.mode)
             for sid, name, eps in results:
                 print(f"{sid}\t{name} ({eps} episodes)")
