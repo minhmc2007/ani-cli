@@ -66,6 +66,8 @@ help_info() {
         Use VLC to play the video
       --verbose
         Enable verbose logging for debugging
+      --setup
+        Install Python dependencies (venv + playwright + chromium) manually
       --version
         Show the version of the script
       -h, --help
@@ -295,7 +297,7 @@ get_filemoon_links() {
 get_episode_url() {
     [ "$verbose" = 1 ] && printf "\033[1;33m[VERBOSE] Getting stream URL: id=%s ep=%s mode=%s quality=%s\033[0m\n" "$id" "$ep_no" "$mode" "$quality" >&2
 
-    episode=$(python3 "$API_HELPER" --stream "$id" --mode "$mode" --episode "$ep_no" --quality "$quality" ${verbose:+-v} 2>/dev/null)
+    episode=$("$API_PYTHON" "$API_HELPER" --stream "$id" --mode "$mode" --episode "$ep_no" --quality "$quality" ${verbose:+-v} 2>/dev/null)
 
     if [ -n "$episode" ]; then
         [ "$verbose" = 1 ] && printf "\033[1;33m[VERBOSE] Stream URL: %s\033[0m\n" "$episode" >&2
@@ -342,7 +344,7 @@ get_episode_url() {
 # search the query and give results
 search_anime() {
     [ "$verbose" = 1 ] && printf "\033[1;33m[VERBOSE] Searching: %s\033[0m\n" "$1" >&2
-    python3 "$API_HELPER" --search "$1" --mode "$mode" ${verbose:+-v} 2>/dev/null || {
+    "$API_PYTHON" "$API_HELPER" --search "$1" --mode "$mode" ${verbose:+-v} 2>/dev/null || {
         # Fallback to original curl method
         search_gql='query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}'
         curl -e "$allanime_refr" -s -H "Content-Type: application/json" -X POST "${allanime_api}/api" --data "{\"variables\":{\"search\":{\"allowAdult\":false,\"allowUnknown\":false,\"query\":\"$1\"},\"limit\":40,\"page\":1,\"translationType\":\"$mode\",\"countryOrigin\":\"ALL\"},\"query\":\"$search_gql\"}" -A "$agent" | sed 's|Show|\
@@ -367,7 +369,7 @@ time_until_next_ep() {
 # get the episodes list of the selected anime
 episodes_list() {
     [ "$verbose" = 1 ] && printf "\033[1;33m[VERBOSE] Episodes for: %s\033[0m\n" "$*" >&2
-    python3 "$API_HELPER" --episodes "$*" --mode "$mode" ${verbose:+-v} 2>/dev/null || {
+    "$API_PYTHON" "$API_HELPER" --episodes "$*" --mode "$mode" ${verbose:+-v} 2>/dev/null || {
         # Fallback to original curl method
         episodes_list_gql='query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}'
         curl -e "$allanime_refr" -s -H "Content-Type: application/json" -X POST "${allanime_api}/api" --data "{\"variables\":{\"showId\":\"$*\"},\"query\":\"$episodes_list_gql\"}" -A "$agent" | sed -nE "s|.*$mode\":\[([0-9.\",]*)\].*|\1|p" | sed 's|,|\
@@ -530,6 +532,46 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 API_HELPER="${SCRIPT_DIR}/allanime_api.py"
 [ ! -f "$API_HELPER" ] && API_HELPER="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/allanime_api.py"
 [ ! -f "$API_HELPER" ] && API_HELPER="$(dirname "$0")/allanime_api.py"
+
+setup_playwright_env() {
+    printf "\033[1;34mSetting up Python environment (one-time)...\033[0m\n" >&2
+    if command -v termux-setup-package >/dev/null 2>&1; then
+        pkg install playwright 2>&1
+        return 0
+    fi
+    if ! python3 -c 'import venv' 2>/dev/null; then
+        printf "\033[1;31mPython venv module not found. Install it with your package manager.\033[0m\n" >&2
+        printf "  Debian/Ubuntu: apt install python3-venv\n" >&2
+        printf "  Arch: pacman -S python\n" >&2
+        printf "  Fedora: dnf install python3\n" >&2
+        return 1
+    fi
+    python3 -m venv "$VENV_DIR" || { printf "venv creation failed\n" >&2; return 1; }
+    "$VENV_DIR/bin/pip" install --quiet playwright 2>/dev/null ||
+    "$VENV_DIR/bin/python3" -m pip install --quiet playwright 2>/dev/null || {
+        printf "\033[1;31mPlaywright pip install failed.\033[0m\n" >&2
+        printf "Manually: pip install playwright && playwright install chromium\n" >&2
+        return 1
+    }
+    "$VENV_DIR/bin/playwright" install chromium 2>&1 | tail -1
+    if [ -f "$VENV_DIR/bin/python3" ]; then
+        API_PYTHON="$VENV_DIR/bin/python3"
+        printf "\033[1;32mEnvironment ready!\033[0m\n" >&2
+    fi
+}
+
+VENV_DIR="$(dirname "$API_HELPER")/venv"
+API_PYTHON="python3"
+if [ -f "$API_HELPER" ] && [ -f "$VENV_DIR/bin/python3" ]; then
+    API_PYTHON="$VENV_DIR/bin/python3"
+fi
+
+# Auto-setup on first run (unless --setup was passed explicitly)
+case " $* " in *" --setup "*) ;; *)
+    if [ -f "$API_HELPER" ] && [ ! -f "$VENV_DIR/bin/python3" ] && [ ! -f /tmp/anicli_novenv ]; then
+        setup_playwright_env || touch /tmp/anicli_novenv
+    fi
+;; esac
 [ -t 0 ] || (command -v dmenu && use_external_menu=2)
 [ -t 0 ] || (command -v rofi && use_external_menu=1)
 hist_dir="${ANI_CLI_HIST_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ani-cli}"
@@ -606,6 +648,7 @@ while [ $# -gt 0 ]; do
             ;;
         -N | --nextep-countdown) search=nextep ;;
         --verbose) verbose=1 ;;
+        --setup) setup_playwright_env; exit $? ;;
         -U | --update)
             branch="${2:-$branch}"
             update_script
